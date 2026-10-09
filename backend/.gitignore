@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+*.egg-info/
+
+# Environment — NEVER commit real credentials
+.env
+.env.local
+
+# Database files (local dev SQLite)
+*.db
+*.sqlite3
+
+# Model weights (large binary files)
+*.keras
+*.h5
+*.pkl

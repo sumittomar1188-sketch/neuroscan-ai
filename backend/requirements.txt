@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-multipart
+pillow
+numpy
+tensorflow
+sqlalchemy
+google-auth
+python-dotenv
+requests
