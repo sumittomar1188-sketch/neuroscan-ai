@@ -158,7 +158,7 @@ export const UploadMRI = () => {
         setValidationError(err.message);
       } else {
         setApiError(
-          err.message || 'Failed to connect to FastAPI backend server. Ensure FastAPI is running on http://127.0.0.1:8000.'
+          err.message || 'Failed to connect to FastAPI backend server. Please verify backend service availability.'
         );
       }
     } finally {

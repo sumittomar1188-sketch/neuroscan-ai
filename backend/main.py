@@ -26,10 +26,26 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# Enable CORS for local development
+# Configure CORS: allow deployed Vercel frontend, local development hosts, and optional env overrides
+default_origins = [
+    "https://neuroscan-ai-murex.vercel.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+
+env_origins = os.getenv("ALLOWED_ORIGINS", "")
+if env_origins.strip():
+    allowed_origins = [orig.strip() for orig in env_origins.split(",") if orig.strip()]
+else:
+    allowed_origins = default_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -41,36 +57,50 @@ TARGET_CONV_LAYER = "conv5_block3_3_conv"
 # Model loading helper
 MODEL = None
 
+def get_possible_model_paths():
+    paths = []
+    # 1. Environment variable MODEL_PATH (highest priority for Railway/custom hosting)
+    env_path = os.getenv("MODEL_PATH")
+    if env_path and env_path.strip():
+        paths.append(env_path.strip())
+
+    # 2. Standard relative paths within backend
+    base_dir = os.path.dirname(__file__)
+    paths.append(os.path.join(base_dir, "brain_tumor_resnet50.keras"))
+    paths.append(os.path.join(base_dir, "models", "brain_tumor_resnet50.keras"))
+    paths.append(os.path.join(base_dir, "venv", "brain_tumor_resnet50.keras"))
+    return paths
+
 def load_resnet_model():
     global MODEL
     if MODEL is not None:
         return MODEL
-    
-    possible_paths = [
-        os.path.join(os.path.dirname(__file__), "venv", "brain_tumor_resnet50.keras"),
-        os.path.join(os.path.dirname(__file__), "brain_tumor_resnet50.keras"),
-        "c:/Users/hp/Desktop/brain_tumor_app/backend/venv/brain_tumor_resnet50.keras"
-    ]
-    
+
+    possible_paths = get_possible_model_paths()
+    load_errors = []
+
     for path in possible_paths:
         if os.path.exists(path):
             try:
                 print(f"Loading trained ResNet50 model from: {path}")
                 MODEL = tf.keras.models.load_model(path)
-                print("Model loaded successfully!")
+                print("Trained ResNet50 model loaded successfully!")
                 return MODEL
             except Exception as e:
-                print(f"Failed to load model from {path}: {e}")
+                err_msg = f"Failed to load model from {path}: {e}"
+                print(err_msg)
+                load_errors.append(err_msg)
 
-    print("WARNING: Trained model file not found at expected paths. Instantiating ResNet50 architecture...")
-    base = tf.keras.applications.ResNet50(weights="imagenet", include_top=False, input_shape=(224, 224, 3))
-    x = tf.keras.layers.GlobalAveragePooling2D(name="global_average_pooling2d")(base.output)
-    x = tf.keras.layers.BatchNormalization(name="batch_normalization")(x)
-    x = tf.keras.layers.Dense(256, activation="relu", name="dense")(x)
-    x = tf.keras.layers.Dropout(0.5, name="dropout")(x)
-    outputs = tf.keras.layers.Dense(4, activation="softmax", name="dense_1")(x)
-    MODEL = tf.keras.models.Model(inputs=base.input, outputs=outputs, name="functional")
-    return MODEL
+    # Fail explicitly without falling back to an untrained/random architecture
+    checked_str = ", ".join(f"'{p}'" for p in possible_paths)
+    err_description = (
+        f"Trained ResNet50 model file could not be found or loaded. Checked paths: [{checked_str}]. "
+        "Please provide the trained .keras model or set the MODEL_PATH environment variable."
+    )
+    if load_errors:
+        err_description += f" Encountered errors: {'; '.join(load_errors)}"
+    print(f"ERROR: {err_description}")
+    raise RuntimeError(err_description)
 
 
 def apply_jet_colormap(h_2d: np.ndarray) -> np.ndarray:
@@ -147,7 +177,10 @@ from validator import get_mri_validator
 
 @app.on_event("startup")
 def startup_event():
-    load_resnet_model()
+    try:
+        load_resnet_model()
+    except Exception as e:
+        print(f"[Startup Warning] Trained ResNet50 model not loaded: {e}")
     # Pre-warm validator
     try:
         validator = get_mri_validator()
@@ -362,7 +395,13 @@ async def predict(file: UploadFile = File(...)):
         )
 
     # --- RESNET50 TUMOR CLASSIFICATION STAGE ---
-    model = load_resnet_model()
+    try:
+        model = load_resnet_model()
+    except Exception as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Tumor classification model unavailable: {str(e)}"
+        )
 
     # Preprocess image tensor for model inference
     img_rgb = pil_img.convert("RGB")

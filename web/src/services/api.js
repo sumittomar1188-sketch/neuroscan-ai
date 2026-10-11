@@ -4,7 +4,16 @@
  * Uses relative proxy path /api in development to bypass CORS restrictions.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+const RAW_API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+
+/**
+ * Active backend base URL.
+ * In production on Vercel, this comes from VITE_API_BASE_URL (pointing to Railway).
+ * In local dev, falls back to http://localhost:8000 if not specified.
+ */
+export const API_BASE_URL = (RAW_API_BASE_URL && RAW_API_BASE_URL.trim() !== '')
+  ? RAW_API_BASE_URL.trim().replace(/\/+$/, '')
+  : (import.meta.env.DEV ? 'http://localhost:8000' : '');
 
 /**
  * Get configured backend base URL
